@@ -1,6 +1,5 @@
 # app.py
 from flask import Flask
-from routes.image_routes import image_bp
 import cloudinary
 import os
 from dotenv import load_dotenv
@@ -24,8 +23,13 @@ def create_app():
         secure=True
     )
     
-    # Register blueprints
-    app.register_blueprint(image_bp)
+    # Import and register blueprints after app creation to avoid circular imports
+    try:
+        from routes.image_routes import image_bp
+        app.register_blueprint(image_bp)
+    except ImportError as e:
+        print(f"Error importing routes: {e}")
+        raise
     
     # Global error handlers
     @app.errorhandler(404)
@@ -49,8 +53,15 @@ def create_app():
             'code': 'INTERNAL_ERROR'
         }, 500
     
+    # Add a simple health check route
+    @app.route('/health')
+    def health():
+        return {'status': 'healthy'}, 200
+    
     return app
 
+# Create the app instance
+app = create_app()
+
 if __name__ == '__main__':
-    app = create_app()
     app.run(debug=True, host='0.0.0.0', port=8000)
