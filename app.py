@@ -1,37 +1,56 @@
-import os
+# app.py
 from flask import Flask
-from dotenv import load_dotenv
+from routes.image_routes import image_bp
 import cloudinary
+import os
+from dotenv import load_dotenv
 
-from db import db
-from controller.watermark_controller import watermark_bp
-from controller.image_controller import image_bp
-    
-# 1. load .env
+# Load environment variables
 load_dotenv()
 
-# 2. flask + db setup
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(
-    'DATABASE_URL',
-    'postgresql+psycopg2://user:12345@localhost:5432/watermark_db'
-)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# 3. cloudinary config
-cloudinary.config(
-    cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
-    api_key    = os.getenv('CLOUDINARY_API_KEY'),
-    api_secret = os.getenv('CLOUDINARY_API_SECRET'),
-    secure     = True
-)
-
-# 4. register extensions & blueprints
-db.init_app(app)
-app.register_blueprint(watermark_bp)
-app.register_blueprint(image_bp)
+def create_app():
+    """Application factory pattern"""
+    app = Flask(__name__)
+    
+    # Configure Flask
+    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
+    app.config['JSON_SORT_KEYS'] = False
+    
+    # Configure Cloudinary
+    cloudinary.config(
+        cloud_name=os.getenv('CLOUDINARY_CLOUD_NAME'),
+        api_key=os.getenv('CLOUDINARY_API_KEY'),
+        api_secret=os.getenv('CLOUDINARY_API_SECRET'),
+        secure=True
+    )
+    
+    # Register blueprints
+    app.register_blueprint(image_bp)
+    
+    # Global error handlers
+    @app.errorhandler(404)
+    def not_found(error):
+        return {
+            'error': 'Endpoint not found',
+            'code': 'NOT_FOUND'
+        }, 404
+    
+    @app.errorhandler(405)
+    def method_not_allowed(error):
+        return {
+            'error': 'Method not allowed',
+            'code': 'METHOD_NOT_ALLOWED'
+        }, 405
+    
+    @app.errorhandler(500)
+    def internal_error(error):
+        return {
+            'error': 'Internal server error',
+            'code': 'INTERNAL_ERROR'
+        }, 500
+    
+    return app
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    app.run(debug=True)
+    app = create_app()
+    app.run(debug=True, host='0.0.0.0', port=8000)
