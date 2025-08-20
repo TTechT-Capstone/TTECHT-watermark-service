@@ -162,7 +162,7 @@ class ImageController:
             # Extract parameters
             original_image = data['original_image']
             watermark_image = data['watermark_image']
-            alpha = data.get('alpha', 0.6)  # Default alpha value
+            alpha = float(data.get('alpha', 0.6))  # Default alpha value
 
             # Process watermark embedding through service
             result = self.embedded_service.embed_watermark_from_base64(
@@ -227,7 +227,9 @@ class ImageController:
 
             # Extract parameters
             suspect_image = data['suspect_image']
-            sideinfo_json_path = data.get('sideinfo_json_path', None)
+            raw_sideinfo = data.get('sideinfo_json_path', None)
+            sideinfo_json_path = (raw_sideinfo or '').strip() or None
+
 
             # Process watermark extraction through service
             result = self.extract_service.extract_watermark_from_base64(
@@ -249,7 +251,8 @@ class ImageController:
                         'canonical_size': result['canonical_size'],
                         'sideinfo_used': result['sideinfo_used'],
                         'watermark_logo': result['watermark_logo'],
-                        'extracted_path': result['extracted_path']
+                        'extracted_path': result['extracted_path'],
+                        'suspect_save_path': result['suspect_save_path'],
                     }
                 }), 200
             
@@ -260,7 +263,8 @@ class ImageController:
                     'status': 'no_extraction',
                     'reason': result['reason'],
                     'data': {
-                        'proceed_to_embedding': True
+                        'proceed_to_embedding': True,
+                        'suspect_save_path': result['suspect_save_path'],
                     }
                 }), 200
             
@@ -317,9 +321,13 @@ class ImageController:
             # Extract parameters
             original_watermark = data['original_watermark']
             extracted_watermark = data['extracted_watermark']
-            pcc_threshold = data.get('pcc_threshold', 0.70)
-            save_record = data.get('save_record', False)
+            pcc_threshold = float(data.get('pcc_threshold', 0.70))
+            save_record = bool(data.get('save_record', False))
             suspect_image = data.get('suspect_image', None)
+            # Optional parameters
+            matched_json_path = data.get('matched_json_path')  
+            suspect_image_path = data.get('suspect_image_path')  
+
 
             # Process watermark detection through service
             result = self.stat_detect_service.compare_watermarks_from_base64(
@@ -327,7 +335,9 @@ class ImageController:
                 extracted_wm_b64=extracted_watermark,
                 pcc_threshold=pcc_threshold,
                 save_record=save_record,
-                suspect_image_b64=suspect_image
+                suspect_image_b64=suspect_image,
+                matched_json_path=matched_json_path,
+                suspect_image_path=suspect_image_path
             )
             
             return jsonify({

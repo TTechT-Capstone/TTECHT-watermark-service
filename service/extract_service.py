@@ -51,12 +51,12 @@ class ExtractService:
         # Perform extraction
         result = self._extract_from_suspect(suspect_path, sideinfo_json_path, extracted_path)
         
-        # Clean up temp file
-        try:
-            os.remove(suspect_path)
-            os.rmdir(temp_dir)
-        except:
-            pass
+        # Clean up temp file - i think we want to keep the suspect img path for admin to log the detect record
+        #try:
+            #os.remove(suspect_path)
+            #os.rmdir(temp_dir)
+        #except:
+            #pass
         
         # Convert extracted image to base64 if extraction was successful
         if result["status"] == "ok_extracted" and os.path.exists(extracted_path):

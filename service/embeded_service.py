@@ -8,6 +8,7 @@ from pathlib import Path
 import base64
 import io
 import tempfile
+import uuid
 from typing import Tuple, Dict, Any
 
 class EmbeddedService:
@@ -39,6 +40,13 @@ class EmbeddedService:
         # Convert to RGB if needed
         original_image = original_image.convert("RGB")
         watermark_image = watermark_image.convert("RGB")
+
+        logo_id = str(uuid.uuid4())
+        if output_dir is None:
+            output_dir = os.path.join(tempfile.gettempdir(), "watermarked_images")
+        os.makedirs(output_dir, exist_ok=True)
+        wm_logo_path = os.path.join(output_dir, f"watermark_logo_{logo_id}.jpg")
+        watermark_image.save(wm_logo_path)
         
         # Resize watermark to match original image size
         watermark_image = watermark_image.resize(original_image.size)
@@ -97,6 +105,7 @@ class EmbeddedService:
                 "B": [float(x) for x in S_val_B.tolist()]
             },
             "watermark_ref": {
+                "path": wm_logo_path,
                 "resized_to": list(original_image.size)
             }
         }
