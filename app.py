@@ -1,5 +1,6 @@
 # app.py
 from flask import Flask
+from flask_cors import CORS
 import cloudinary
 import os
 from dotenv import load_dotenv
@@ -10,6 +11,28 @@ load_dotenv()
 def create_app():
     """Application factory pattern"""
     app = Flask(__name__)
+    
+    # Configure CORS
+    # Get allowed origins from environment variable
+    allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:8080,https://www.origity.store').split(',')
+    
+    # Clean up origins (remove whitespace and empty strings)
+    allowed_origins = [origin.strip() for origin in allowed_origins if origin.strip()]
+    
+    print(f"🔒 CORS allowed origins: {allowed_origins}")
+    
+    CORS(app, resources={
+        r"/api/*": {
+            "origins": allowed_origins,
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+            "supports_credentials": True
+        },
+        r"/health": {
+            "origins": allowed_origins,
+            "methods": ["GET"]
+        }
+    })
     
     # Configure Flask
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
