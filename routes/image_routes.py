@@ -39,6 +39,7 @@ def detect_watermark():
     """Detect/compare watermarks using statistical metrics endpoint"""
     return image_controller.detect_watermark()
 
+
 @image_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""

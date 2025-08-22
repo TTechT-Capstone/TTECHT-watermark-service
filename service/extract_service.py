@@ -9,13 +9,17 @@ import glob
 import base64
 import io
 import tempfile
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Callable
 import uuid
+import requests
 
 class ExtractService:
-    def __init__(self):
+    def __init__(self, sideinfo_fetcher: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None):
         self.phash_hamming_threshold = 12  # Hamming distance threshold for pHash (tune 8–14)
         self.sideinfo_dir = os.path.join(tempfile.gettempdir(), "watermarked_images")
+        # Optional hook to fetch sideinfo JSON from an external database by key/id
+        # Signature: fetcher(ref: str) -> Optional[dict]
+        self.sideinfo_fetcher = sideinfo_fetcher
     
     def extract_watermark_from_base64(self, suspect_image_b64: str, sideinfo_json_path: str = None, 
                                      output_dir: str = None) -> Dict[str, Any]:
@@ -24,7 +28,7 @@ class ExtractService:
         
         Args:
             suspect_image_b64: Base64 encoded suspect image
-            sideinfo_json_path: Optional path to specific sideinfo JSON file
+            sideinfo_json_path: Optional path/URL/DB-key to sideinfo JSON
             output_dir: Output directory for extracted watermark (default: temp directory)
             
         Returns:
@@ -48,8 +52,15 @@ class ExtractService:
         unique_id = str(uuid.uuid4())
         extracted_path = os.path.join(output_dir, f"extracted_{unique_id}.jpg")
         
-        # Perform extraction
-        result = self._extract_from_suspect(suspect_path, sideinfo_json_path, extracted_path)
+        # Perform extraction (with optional sideinfo resolution)
+        if sideinfo_json_path:
+            meta, sideinfo_used = self._resolve_sideinfo(sideinfo_json_path)
+            if meta is None:
+                result = {"status": "skip_bad_meta", "reason": "Side-info not found/invalid. Proceed to embedding."}
+            else:
+                result = self._extract_from_suspect_with_meta(suspect_path, meta, extracted_path, sideinfo_used)
+        else:
+            result = self._extract_from_suspect(suspect_path, None, extracted_path)
         
         # Clean up temp file
         try:
@@ -65,6 +76,64 @@ class ExtractService:
             result["extracted_image_b64"] = extracted_b64
             result["unique_id"] = unique_id
         
+        return result
+    
+    def extract_watermark_from_url(self, suspect_image_url: str, sideinfo_json_path: str = None,
+                                   output_dir: str = None, timeout_seconds: int = 15) -> Dict[str, Any]:
+        """
+        Extract watermark from a suspect image available at a URL
+        
+        Args:
+            suspect_image_url: Publicly accessible HTTP(S) URL to the suspect image
+            sideinfo_json_path: Optional path/URL/DB-key to sideinfo JSON
+            output_dir: Output directory for extracted watermark (default: temp directory)
+            timeout_seconds: HTTP timeout for fetching the image
+        Returns:
+            Dict containing extraction results and metadata
+        """
+        # Download image to PIL
+        suspect_image = self._download_image_to_pil(suspect_image_url, timeout_seconds)
+        
+        # Create temp directory for processing
+        temp_dir = tempfile.mkdtemp()
+        suspect_path = os.path.join(temp_dir, f"suspect_{uuid.uuid4().hex}.jpg")
+        suspect_image.save(suspect_path)
+        
+        # Create output directory if not specified
+        if output_dir is None:
+            output_dir = os.path.join(tempfile.gettempdir(), "extracted_watermarks")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate unique filename for extracted watermark
+        unique_id = str(uuid.uuid4())
+        extracted_path = os.path.join(output_dir, f"extracted_{unique_id}.jpg")
+        
+        # Perform extraction (with optional sideinfo resolution)
+        if sideinfo_json_path:
+            meta, sideinfo_used = self._resolve_sideinfo(sideinfo_json_path)
+            if meta is None:
+                result = {"status": "skip_bad_meta", "reason": "Side-info not found/invalid. Proceed to embedding."}
+            else:
+                result = self._extract_from_suspect_with_meta(suspect_path, meta, extracted_path, sideinfo_used)
+        else:
+            result = self._extract_from_suspect(suspect_path, None, extracted_path)
+        
+        # Clean up temp file
+        try:
+            os.remove(suspect_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
+        
+        # Convert extracted image to base64 if extraction was successful
+        if result["status"] == "ok_extracted" and os.path.exists(extracted_path):
+            with open(extracted_path, "rb") as f:
+                extracted_b64 = base64.b64encode(f.read()).decode('utf-8')
+            result["extracted_image_b64"] = extracted_b64
+            result["unique_id"] = unique_id
+        
+        # Include the URL for traceability
+        result["suspect_image_url"] = suspect_image_url
         return result
     
     def _to_uint8(self, mat: np.ndarray) -> np.ndarray:
@@ -150,6 +219,51 @@ class ExtractService:
         if best_json and best_dist <= max_ham:
             return best_json, best_meta
         return None, None
+    
+    def _resolve_sideinfo(self, ref: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Resolve sideinfo reference from file path, HTTP(S) URL, or database via fetcher.
+        Returns (meta_dict, sideinfo_used_label)."""
+        # 1) Local file path
+        if isinstance(ref, str) and os.path.exists(ref):
+            try:
+                with open(ref, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                return meta, ref
+            except Exception:
+                return None, None
+        # 2) HTTP(S) URL returning JSON
+        if isinstance(ref, str) and ref.lower().startswith(("http://", "https://")):
+            try:
+                r = requests.get(ref, timeout=15)
+                r.raise_for_status()
+                return r.json(), ref
+            except Exception:
+                return None, None
+        # 3) External DB via fetcher (e.g., pass an ID/key)
+        if self.sideinfo_fetcher is not None:
+            try:
+                meta = self.sideinfo_fetcher(ref)
+                if isinstance(meta, dict):
+                    return meta, f"db:{ref}"
+            except Exception:
+                return None, None
+        return None, None
+
+    def _download_image_to_pil(self, url: str, timeout_seconds: int) -> Image.Image:
+        """Download an image from URL into a PIL Image with basic validations."""
+        if not url or not isinstance(url, str):
+            raise ValueError("suspect_image_url must be a non-empty string URL")
+        resp = requests.get(url, stream=True, timeout=timeout_seconds)
+        resp.raise_for_status()
+        content_type = resp.headers.get('Content-Type', '').lower()
+        if 'image' not in content_type:
+            # Fallback: still try to open if content-type is missing or wrong
+            pass
+        data = resp.content
+        try:
+            return Image.open(io.BytesIO(data)).convert("RGB")
+        except Exception as e:
+            raise ValueError(f"Failed to decode image from URL: {e}")
 
     def _extract_channel(self, suspect_channel: np.ndarray, watermark_channel: np.ndarray, 
                         S_orig_saved: np.ndarray, wavelet_name: str, alpha: float = 0.6, 
@@ -272,6 +386,58 @@ class ExtractService:
             "wavelet": wavelet_name,
             "canonical_size": canonical_wh,
             "sideinfo_used": sideinfo_path,
+            "watermark_logo": wm_logo_path,
+            "extracted_path": out_path
+        }
+    
+    def _extract_from_suspect_with_meta(self, suspect_path: str, meta: Dict[str, Any], out_path: str, sideinfo_used: Optional[str]) -> Dict[str, Any]:
+        """Same as _extract_from_suspect but uses an already-fetched meta dict (e.g., from DB/URL)."""
+        try:
+            alpha        = float(meta["wm_params"]["alpha"])
+            wavelet_name = meta["wm_params"]["wavelet"]
+            canonical_wh = tuple(meta.get("canonical_size", [0, 0]))  # (W, H)
+            S_R = np.array(meta["host_S"]["R"], dtype=np.float64)
+            S_G = np.array(meta["host_S"]["G"], dtype=np.float64)
+            S_B = np.array(meta["host_S"]["B"], dtype=np.float64)
+            wm_logo_path = meta["watermark_ref"]["path"]
+        except KeyError as e:
+            return {"status": "skip_bad_meta", "reason": f"Missing key {e}. Proceed to embedding."}
+        except Exception as e:
+            return {"status": "skip_bad_meta", "reason": f"Unreadable side-info: {e}. Proceed to embedding."}
+
+        if not os.path.exists(wm_logo_path):
+            return {"status": "skip_bad_meta", "reason": "Watermark logo path invalid. Proceed to embedding."}
+
+        try:
+            watermark_logo = Image.open(wm_logo_path).convert("RGB")
+            suspect_img    = Image.open(suspect_path).convert("RGB")
+        except Exception as e:
+            return {"status": "skip_bad_meta", "reason": f"Image open failed: {e}. Proceed to embedding."}
+
+        if canonical_wh != (0, 0):
+            watermark_logo = watermark_logo.resize(canonical_wh)
+            suspect_img    = suspect_img.resize(canonical_wh)
+        else:
+            canonical_wh = suspect_img.size
+
+        wmr, wmg, wmb = [np.float64(c) for c in watermark_logo.split()]
+        sur, sug, sub = [np.float64(c) for c in suspect_img.split()]
+
+        ext_r = self._extract_channel(sur, wmr, S_R, wavelet_name, alpha, "Red")
+        ext_g = self._extract_channel(sug, wmg, S_G, wavelet_name, alpha, "Green")
+        ext_b = self._extract_channel(sub, wmb, S_B, wavelet_name, alpha, "Blue")
+
+        r8, g8, b8 = map(self._to_uint8, (ext_r, ext_g, ext_b))
+        out_img = Image.merge("RGB", (Image.fromarray(r8), Image.fromarray(g8), Image.fromarray(b8)))
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        out_img.save(out_path)
+
+        return {
+            "status": "ok_extracted",
+            "alpha": alpha,
+            "wavelet": wavelet_name,
+            "canonical_size": canonical_wh,
+            "sideinfo_used": sideinfo_used,
             "watermark_logo": wm_logo_path,
             "extracted_path": out_path
         }

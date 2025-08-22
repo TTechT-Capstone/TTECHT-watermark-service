@@ -132,6 +132,15 @@ pip install -r requirements.txt
 
 **POST** `/api/images/detect-watermark`
 
+### 4. Watermark Management (CRUD)
+
+**POST** `/api/watermarks/` - Create watermark
+**GET** `/api/watermarks/` - Get all watermarks
+**GET** `/api/watermarks/<id>` - Get watermark by ID
+**PUT** `/api/watermarks/<id>` - Update watermark
+**DELETE** `/api/watermarks/<id>` - Delete watermark
+**GET** `/api/watermarks/search?q=<query>` - Search watermarks
+
 #### Request Format
 
 ```json
@@ -186,6 +195,72 @@ pip install -r requirements.txt
 {
   "error": "Error description",
   "code": "ERROR_CODE"
+}
+```
+
+#### Watermark Management Endpoints
+
+**Create Watermark:**
+```json
+{
+  "store_name": "My Store",
+  "watermark_url_image": "https://example.com/logo.png"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Watermark created successfully",
+  "data": {
+    "watermark_id": 1,
+    "store_name": "My Store",
+    "watermark_url_image": "https://example.com/logo.png"
+  }
+}
+```
+
+**Get All Watermarks Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "watermarks": [
+      {
+        "watermark_id": 1,
+        "store_name": "My Store",
+        "watermark_url_image": "https://example.com/logo.png"
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
+**Update Watermark:**
+```json
+{
+  "store_name": "Updated Store Name",
+  "watermark_url_image": "https://example.com/new-logo.png"
+}
+```
+
+**Search Watermarks Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "query": "store",
+    "watermarks": [
+      {
+        "watermark_id": 1,
+        "store_name": "My Store",
+        "watermark_url_image": "https://example.com/logo.png"
+      }
+    ],
+    "count": 1
+  }
 }
 ```
 
@@ -312,6 +387,70 @@ else:
     print(f"Error: {result['error']}")
 ```
 
+### Watermark Management Examples
+
+```python
+import requests
+
+# Create a new watermark
+url = "http://localhost:8000/api/watermarks/"
+payload = {
+    "store_name": "My Store",
+    "watermark_url_image": "https://example.com/logo.png"
+}
+
+response = requests.post(url, json=payload)
+result = response.json()
+
+if result["success"]:
+    watermark = result["data"]
+    print(f"Watermark created with ID: {watermark['watermark_id']}")
+    print(f"Store: {watermark['store_name']}")
+    print(f"Image URL: {watermark['watermark_url_image']}")
+else:
+    print(f"Error: {result['error']}")
+
+# Get all watermarks
+response = requests.get("http://localhost:8000/api/watermarks/")
+result = response.json()
+
+if result["success"]:
+    watermarks = result["data"]["watermarks"]
+    print(f"Found {len(watermarks)} watermarks:")
+    for wm in watermarks:
+        print(f"  ID: {wm['watermark_id']}, Store: {wm['store_name']}")
+
+# Search watermarks
+query = "store"
+response = requests.get(f"http://localhost:8000/api/watermarks/search?q={query}")
+result = response.json()
+
+if result["success"]:
+    matches = result["data"]["watermarks"]
+    print(f"Found {len(matches)} watermarks matching '{query}'")
+
+# Update watermark
+watermark_id = 1
+update_payload = {
+    "store_name": "Updated Store Name"
+}
+
+response = requests.put(f"http://localhost:8000/api/watermarks/{watermark_id}", 
+                       json=update_payload)
+result = response.json()
+
+if result["success"]:
+    print("Watermark updated successfully")
+
+# Delete watermark
+watermark_id = 1
+response = requests.delete(f"http://localhost:8000/api/watermarks/{watermark_id}")
+result = response.json()
+
+if result["success"]:
+    print("Watermark deleted successfully")
+```
+
 ## Example Usage with cURL
 
 ### Embedding
@@ -348,6 +487,37 @@ curl -X POST http://localhost:8000/api/images/detect-watermark \
     "pcc_threshold": 0.70,
     "save_record": true
   }'
+```
+
+### Watermark Management
+
+```bash
+# Create watermark
+curl -X POST http://localhost:8000/api/watermarks/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "store_name": "My Store",
+    "watermark_url_image": "https://example.com/logo.png"
+  }'
+
+# Get all watermarks
+curl -X GET http://localhost:8000/api/watermarks/
+
+# Get watermark by ID
+curl -X GET http://localhost:8000/api/watermarks/1
+
+# Search watermarks
+curl -X GET "http://localhost:8000/api/watermarks/search?q=store"
+
+# Update watermark
+curl -X PUT http://localhost:8000/api/watermarks/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "store_name": "Updated Store Name"
+  }'
+
+# Delete watermark
+curl -X DELETE http://localhost:8000/api/watermarks/1
 ```
 
 ## Algorithm Details
@@ -416,6 +586,19 @@ The API implements your exact statistical detection logic:
 - `WATERMARK_DETECT_ERROR`: Error during watermark detection/comparison process
 - `INVALID_THRESHOLD`: PCC threshold must be between 0 and 1
 - `INVALID_BOOLEAN`: Boolean parameter validation error
+
+### Watermark Management Error Codes
+
+- `WATERMARK_CREATE_ERROR`: Error during watermark creation
+- `WATERMARK_RETRIEVAL_ERROR`: Error during watermark retrieval
+- `WATERMARK_UPDATE_ERROR`: Error during watermark update
+- `WATERMARK_DELETE_ERROR`: Error during watermark deletion
+- `WATERMARK_SEARCH_ERROR`: Error during watermark search
+- `WATERMARK_NOT_FOUND`: Watermark with specified ID not found
+- `INVALID_STORE_NAME`: Invalid store name format
+- `INVALID_IMAGE_URL`: Invalid watermark image URL
+- `MISSING_FIELDS`: No fields provided for update
+- `MISSING_QUERY`: Search query parameter missing
 
 ## Workflow Integration
 
