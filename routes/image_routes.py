@@ -24,6 +24,22 @@ def delete_image(public_id):
     """Delete image endpoint"""
     return image_controller.delete_image(public_id)
 
+@image_bp.route('/embed-watermark', methods=['POST'])
+def embed_watermark():
+    """Embed watermark into image endpoint"""
+    return image_controller.embed_watermark()
+
+@image_bp.route('/extract-watermark', methods=['POST'])
+def extract_watermark():
+    """Extract watermark from suspect image endpoint"""
+    return image_controller.extract_watermark()
+
+@image_bp.route('/detect-watermark', methods=['POST'])
+def detect_watermark():
+    """Detect/compare watermarks using statistical metrics endpoint"""
+    return image_controller.detect_watermark()
+
+
 @image_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -44,4 +60,4 @@ def unsupported_media_type(error):
     return {
         'error': 'Unsupported media type',
         'code': 'UNSUPPORTED_MEDIA_TYPE'
-    }, 415
+    }, 415 

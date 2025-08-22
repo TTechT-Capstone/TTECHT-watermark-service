@@ -3,3 +3,19 @@ gunicorn==21.2.0
 python-dotenv==1.0.0
 cloudinary==1.44.1
 Pillow==10.0.0
+tqdm==4.66.1
+numpy==1.24.3
+opencv-python==4.8.1.78
+PyWavelets==1.4.1
+scikit-image==0.21.0
+requests==2.32.3
+
+# Database drivers - uncomment based on your database choice
+# PostgreSQL
+psycopg2-binary==2.9.9
+
+# MySQL
+# mysql-connector-python==8.2.0
+
+# SQLite (built-in with Python, no additional driver needed)
+# No additional package needed

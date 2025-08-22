@@ -26,7 +26,9 @@ def create_app():
     # Import and register blueprints after app creation to avoid circular imports
     try:
         from routes.image_routes import image_bp
+        from routes.watermark_routes import watermark_bp
         app.register_blueprint(image_bp)
+        app.register_blueprint(watermark_bp)
     except ImportError as e:
         print(f"Error importing routes: {e}")
         raise
