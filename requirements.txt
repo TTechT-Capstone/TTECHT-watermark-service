@@ -19,3 +19,6 @@ psycopg2-binary==2.9.9
 
 # SQLite (built-in with Python, no additional driver needed)
 # No additional package needed
+
+# CORS support
+flask-cors==4.0.0
