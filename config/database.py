@@ -5,10 +5,26 @@ from typing import Dict, Any
 class DatabaseConfig:
     """Database configuration class for watermark service"""
     
-    # Database type - change this based on your database choice
-    DATABASE_TYPE = os.getenv('DATABASE_TYPE', 'postgresql')  # postgresql, mysql, sqlite
+    def __init__(self):
+        """Initialize config and ensure environment variables are loaded"""
+        # Try to load .env file if it exists
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass  # dotenv not installed, use system environment
     
-    # PostgreSQL configuration
+    @property
+    def DATABASE_TYPE(self):
+        """Get database type from environment"""
+        return os.getenv('DATABASE_TYPE', 'postgresql')
+    
+    @property
+    def DATABASE_URL(self):
+        """Get database URL from environment"""
+        return os.getenv('DATABASE_URL')
+    
+    # PostgreSQL configuration (fallback if DATABASE_URL not provided)
     POSTGRESQL_CONFIG = {
         'host': os.getenv('POSTGRESQL_HOST', 'localhost'),
         'port': int(os.getenv('POSTGRESQL_PORT', 5432)),
@@ -18,7 +34,7 @@ class DatabaseConfig:
         'sslmode': os.getenv('POSTGRESQL_SSLMODE', 'prefer')
     }
     
-    # MySQL configuration
+    # MySQL configuration (fallback if DATABASE_URL not provided)
     MYSQL_CONFIG = {
         'host': os.getenv('MYSQL_HOST', 'localhost'),
         'port': int(os.getenv('MYSQL_PORT', 3306)),
@@ -29,71 +45,121 @@ class DatabaseConfig:
         'autocommit': True
     }
     
-    # SQLite configuration
+    # SQLite configuration (fallback if DATABASE_URL not provided)
     SQLITE_CONFIG = {
         'database': os.getenv('SQLITE_DATABASE', 'watermarks.db'),
         'check_same_thread': False
     }
     
-    @classmethod
-    def get_database_url(cls) -> str:
+    def get_database_url(self) -> str:
         """Get database connection URL based on environment variables"""
-        if cls.DATABASE_TYPE == 'postgresql':
-            user = cls.POSTGRESQL_CONFIG['user']
-            password = cls.POSTGRESQL_CONFIG['password']
-            host = cls.POSTGRESQL_CONFIG['host']
-            port = cls.POSTGRESQL_CONFIG['port']
-            database = cls.POSTGRESQL_CONFIG['database']
+        # If DATABASE_URL is provided, use it directly
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        
+        # Otherwise, construct URL from individual parameters
+        if self.DATABASE_TYPE == 'postgresql':
+            user = self.POSTGRESQL_CONFIG['user']
+            password = self.POSTGRESQL_CONFIG['password']
+            host = self.POSTGRESQL_CONFIG['host']
+            port = self.POSTGRESQL_CONFIG['port']
+            database = self.POSTGRESQL_CONFIG['database']
             
             if password:
                 return f"postgresql://{user}:{password}@{host}:{port}/{database}"
             else:
                 return f"postgresql://{user}@{host}:{port}/{database}"
         
-        elif cls.DATABASE_TYPE == 'mysql':
-            user = cls.MYSQL_CONFIG['user']
-            password = cls.MYSQL_CONFIG['password']
-            host = cls.MYSQL_CONFIG['host']
-            port = cls.MYSQL_CONFIG['port']
-            database = cls.MYSQL_CONFIG['database']
+        elif self.DATABASE_TYPE == 'mysql':
+            user = self.MYSQL_CONFIG['user']
+            password = self.MYSQL_CONFIG['password']
+            host = self.MYSQL_CONFIG['host']
+            port = self.MYSQL_CONFIG['port']
+            database = self.MYSQL_CONFIG['database']
             
             if password:
                 return f"mysql://{user}:{password}@{host}:{port}/{database}"
             else:
                 return f"mysql://{user}@{host}:{port}/{database}"
         
-        elif cls.DATABASE_TYPE == 'sqlite':
-            database = cls.SQLITE_CONFIG['database']
+        elif self.DATABASE_TYPE == 'sqlite':
+            database = self.SQLITE_CONFIG['database']
             return f"sqlite:///{database}"
         
         else:
-            raise ValueError(f"Unsupported database type: {cls.DATABASE_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.DATABASE_TYPE}")
     
-    @classmethod
-    def get_connection_params(cls) -> Dict[str, Any]:
+    def get_connection_params(self) -> Dict[str, Any]:
         """Get database connection parameters based on database type"""
-        if cls.DATABASE_TYPE == 'postgresql':
-            return cls.POSTGRESQL_CONFIG
-        elif cls.DATABASE_TYPE == 'mysql':
-            return cls.MYSQL_CONFIG
-        elif cls.DATABASE_TYPE == 'sqlite':
-            return cls.SQLITE_CONFIG
+        # If DATABASE_URL is provided, parse it to get connection params
+        if self.DATABASE_URL:
+            return self._parse_database_url(self.DATABASE_URL)
+        
+        # Otherwise, use individual parameters
+        if self.DATABASE_TYPE == 'postgresql':
+            return self.POSTGRESQL_CONFIG
+        elif self.DATABASE_TYPE == 'mysql':
+            return self.MYSQL_CONFIG
+        elif self.DATABASE_TYPE == 'sqlite':
+            return self.SQLITE_CONFIG
         else:
-            raise ValueError(f"Unsupported database type: {cls.DATABASE_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.DATABASE_TYPE}")
     
-    @classmethod
-    def get_sql_dialect(cls) -> str:
+    def _parse_database_url(self, database_url: str) -> Dict[str, Any]:
+        """Parse DATABASE_URL to extract connection parameters"""
+        try:
+            from urllib.parse import urlparse
+            
+            parsed = urlparse(database_url)
+            
+            if parsed.scheme == 'postgresql':
+                return {
+                    'host': parsed.hostname or 'localhost',
+                    'port': parsed.port or 5432,
+                    'database': parsed.path.lstrip('/') or 'watermark_service',
+                    'user': parsed.username or 'postgres',
+                    'password': parsed.password or '',
+                    'sslmode': 'prefer'
+                }
+            elif parsed.scheme == 'mysql':
+                return {
+                    'host': parsed.hostname or 'localhost',
+                    'port': parsed.port or 3306,
+                    'database': parsed.path.lstrip('/') or 'watermark_service',
+                    'user': parsed.username or 'root',
+                    'password': parsed.password or '',
+                    'charset': 'utf8mb4',
+                    'autocommit': True
+                }
+            elif parsed.scheme == 'sqlite':
+                return {
+                    'database': parsed.path.lstrip('/') or 'watermarks.db',
+                    'check_same_thread': False
+                }
+            else:
+                raise ValueError(f"Unsupported database scheme: {parsed.scheme}")
+                
+        except Exception as e:
+            raise ValueError(f"Invalid DATABASE_URL format: {e}")
+    
+    def get_sql_dialect(self) -> str:
         """Get SQL dialect for the configured database"""
-        if cls.DATABASE_TYPE == 'postgresql':
+        if self.DATABASE_TYPE == 'postgresql':
             return 'postgresql'
-        elif cls.DATABASE_TYPE == 'mysql':
+        elif self.DATABASE_TYPE == 'mysql':
             return 'mysql'
-        elif cls.DATABASE_TYPE == 'sqlite':
+        elif self.DATABASE_TYPE == 'sqlite':
             return 'sqlite'
         else:
-            raise ValueError(f"Unsupported database type: {cls.DATABASE_TYPE}")
+            raise ValueError(f"Unsupported database type: {self.DATABASE_TYPE}")
 
 # Example environment variables for .env file:
+# Option 1: Use DATABASE_URL (recommended)
+# DATABASE_URL=postgresql://username:password@host:port/database
+# DATABASE_URL=mysql://username:password@host:port/database
+# DATABASE_URL=sqlite:///watermarks.db
+
+# Option 2: Use individual parameters (fallback)
 # DATABASE_TYPE=postgresql
 # POSTGRESQL_HOST=your-db-host.com
 # POSTGRESQL_PORT=5432

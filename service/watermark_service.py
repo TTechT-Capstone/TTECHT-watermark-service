@@ -4,46 +4,28 @@ import tempfile
 from typing import List, Dict, Optional
 from entity.watermark import Watermark
 import uuid
+from config.database_manager import DatabaseManager
 
 class WatermarkService:
     def __init__(self):
-        """Initialize watermark service with storage file"""
-        self.storage_file = os.path.join(tempfile.gettempdir(), "watermarks.json")
-        self._ensure_storage_exists()
-        
-        # TODO: Replace with actual database connection
-        # self.db_connection = self._get_database_connection()
-    
-    def _get_database_connection(self):
-        """
-        Get database connection - to be implemented with actual database
-        Example: PostgreSQL, MySQL, SQLite, etc.
-        """
-        # Placeholder for database connection
-        # Example: return psycopg2.connect(DATABASE_URL)
-        # Example: return mysql.connector.connect(**DB_CONFIG)
-        # Example: return sqlite3.connect('watermarks.db')
-        pass
-    
-    def _ensure_storage_exists(self):
-        """Ensure the storage file exists with initial structure"""
-        if not os.path.exists(self.storage_file):
-            os.makedirs(os.path.dirname(self.storage_file), exist_ok=True)
-            with open(self.storage_file, 'w', encoding='utf-8') as f:
-                json.dump([], f, ensure_ascii=False, indent=2)
-    
-    def _load_watermarks(self) -> List[Dict]:
-        """Load watermarks from storage file - to be replaced with database query"""
+        """Initialize watermark service with database connection"""
+        # Initialize database manager
         try:
-            with open(self.storage_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
+            self.db_manager = DatabaseManager()
+            
+            # Create tables if they don't exist
+            try:
+                self.db_manager.create_tables()
+                print("✓ Database connection successful")
+            except Exception as e:
+                print(f"✗ Database table creation failed: {e}")
+                raise Exception(f"Database initialization failed: {e}")
+                
+        except Exception as e:
+            print(f"✗ Database connection failed: {e}")
+            raise Exception(f"Database connection failed: {e}")
     
-    def _save_watermarks(self, watermarks: List[Dict]):
-        """Save watermarks to storage file - to be replaced with database operations"""
-        with open(self.storage_file, 'w', encoding='utf-8') as f:
-            json.dump(watermarks, f, ensure_ascii=False, indent=2)
+
     
     def create_watermark(self, store_name: str, watermark_url_image: str) -> Watermark:
         """
@@ -65,27 +47,47 @@ class WatermarkService:
         if not watermark_url_image or not watermark_url_image.strip():
             raise ValueError("Watermark image URL cannot be empty")
         
-        # TODO: Replace with database INSERT operation
-        # Example SQL: INSERT INTO watermarks (store_name, watermark_url_image) VALUES (%s, %s) RETURNING watermark_id
+        # Use database only
+        if self.db_manager.db_type == 'postgresql':
+            # PostgreSQL needs RETURNING clause to get the generated ID
+            query = """
+                INSERT INTO watermarks (store_name, watermark_url_image) 
+                VALUES (%s, %s)
+                RETURNING watermark_id
+            """
+        else:
+            # MySQL and SQLite don't need RETURNING
+            query = """
+                INSERT INTO watermarks (store_name, watermark_url_image) 
+                VALUES (%s, %s)
+            """
         
-        # Load existing watermarks (temporary file-based storage)
-        watermarks_data = self._load_watermarks()
+        if self.db_manager.db_type == 'sqlite':
+            query = query.replace('%s', '?')
         
-        # Generate unique watermark ID
-        existing_ids = [w.get('watermark_id', 0) for w in watermarks_data]
-        watermark_id = max(existing_ids, default=0) + 1
+        with self.db_manager.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (store_name.strip(), watermark_url_image.strip()))
+            
+            if self.db_manager.db_type == 'postgresql':
+                # PostgreSQL returns the ID via RETURNING clause
+                result = cursor.fetchone()
+                if result:
+                    watermark_id = result[0]
+                else:
+                    raise Exception("Failed to get generated watermark ID from PostgreSQL")
+            else:
+                # MySQL and SQLite use lastrowid
+                watermark_id = cursor.lastrowid
+            
+            conn.commit()
         
-        # Create watermark object
+        # Create and return watermark object
         watermark = Watermark(
             watermark_id=watermark_id,
             store_name=store_name.strip(),
             watermark_url_image=watermark_url_image.strip()
         )
-        
-        # Add to storage (temporary file-based storage)
-        watermarks_data.append(watermark.to_dict())
-        self._save_watermarks(watermarks_data)
-        
         return watermark
     
     def get_watermark_by_id(self, watermark_id: int) -> Optional[Watermark]:
@@ -98,14 +100,21 @@ class WatermarkService:
         Returns:
             Watermark: Watermark object if found, None otherwise
         """
-        # TODO: Replace with database SELECT operation
-        # Example SQL: SELECT watermark_id, store_name, watermark_url_image FROM watermarks WHERE watermark_id = %s
+        # Use database only
+        query = """
+            SELECT watermark_id, store_name, watermark_url_image 
+            FROM watermarks 
+            WHERE watermark_id = %s
+        """
         
-        watermarks_data = self._load_watermarks()
+        if self.db_manager.db_type == 'sqlite':
+            query = query.replace('%s', '?')
         
-        for watermark_data in watermarks_data:
-            if watermark_data.get('watermark_id') == watermark_id:
-                return Watermark.from_dict(watermark_data)
+        result = self.db_manager.execute_query(query, (watermark_id,))
+        
+        if result and len(result) > 0:
+            watermark_data = result[0]
+            return Watermark.from_dict(watermark_data)
         
         return None
     
@@ -119,14 +128,21 @@ class WatermarkService:
         Returns:
             Watermark: Watermark object if found, None otherwise
         """
-        # TODO: Replace with database SELECT operation
-        # Example SQL: SELECT watermark_id, store_name, watermark_url_image FROM watermarks WHERE store_name = %s
+        # Use database only
+        query = """
+            SELECT watermark_id, store_name, watermark_url_image 
+            FROM watermarks 
+            WHERE store_name = %s
+        """
         
-        watermarks_data = self._load_watermarks()
+        if self.db_manager.db_type == 'sqlite':
+            query = query.replace('%s', '?')
         
-        for watermark_data in watermarks_data:
-            if watermark_data.get('store_name', '').lower() == store_name.lower():
-                return Watermark.from_dict(watermark_data)
+        result = self.db_manager.execute_query(query, (store_name,))
+        
+        if result and len(result) > 0:
+            watermark_data = result[0]
+            return Watermark.from_dict(watermark_data)
         
         return None
     
@@ -137,11 +153,19 @@ class WatermarkService:
         Returns:
             List[Watermark]: List of all watermark objects
         """
-        # TODO: Replace with database SELECT operation
-        # Example SQL: SELECT watermark_id, store_name, watermark_url_image FROM watermarks ORDER BY watermark_id
+        # Use database only
+        query = """
+            SELECT watermark_id, store_name, watermark_url_image 
+            FROM watermarks 
+            ORDER BY watermark_id
+        """
         
-        watermarks_data = self._load_watermarks()
-        return [Watermark.from_dict(w) for w in watermarks_data]
+        result = self.db_manager.execute_query(query)
+        
+        if result:
+            return [Watermark.from_dict(w) for w in result]
+        
+        return []
     
     def update_watermark(self, watermark_id: int, store_name: str = None, 
                         watermark_url_image: str = None) -> Optional[Watermark]:
@@ -162,31 +186,47 @@ class WatermarkService:
         if store_name is None and watermark_url_image is None:
             raise ValueError("At least one field must be provided for update")
         
-        # TODO: Replace with database UPDATE operation
-        # Example SQL: UPDATE watermarks SET store_name = %s, watermark_url_image = %s WHERE watermark_id = %s
+        # Use database only
+        # Build dynamic update query
+        update_fields = []
+        params = []
         
-        watermarks_data = self._load_watermarks()
+        if store_name is not None:
+            if not store_name.strip():
+                raise ValueError("Store name cannot be empty")
+            update_fields.append("store_name = %s")
+            params.append(store_name.strip())
         
-        for i, watermark_data in enumerate(watermarks_data):
-            if watermark_data.get('watermark_id') == watermark_id:
-                # Update fields if provided
-                if store_name is not None:
-                    if not store_name.strip():
-                        raise ValueError("Store name cannot be empty")
-                    watermark_data['store_name'] = store_name.strip()
-                
-                if watermark_url_image is not None:
-                    if not watermark_url_image.strip():
-                        raise ValueError("Watermark image URL cannot be empty")
-                    watermark_data['watermark_url_image'] = watermark_url_image.strip()
-                
-                # Save updated data (temporary file-based storage)
-                self._save_watermarks(watermarks_data)
-                
-                # Return updated watermark object
-                return Watermark.from_dict(watermark_data)
+        if watermark_url_image is not None:
+            if not watermark_url_image.strip():
+                raise ValueError("Watermark image URL cannot be empty")
+            update_fields.append("watermark_url_image = %s")
+            params.append(watermark_url_image.strip())
         
-        return None
+        # Add timestamp update
+        if self.db_manager.db_type == 'postgresql':
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        elif self.db_manager.db_type == 'mysql':
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        elif self.db_manager.db_type == 'sqlite':
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        
+        query = f"""
+            UPDATE watermarks 
+            SET {', '.join(update_fields)}
+            WHERE watermark_id = %s
+        """
+        
+        if self.db_manager.db_type == 'sqlite':
+            query = query.replace('%s', '?')
+        
+        params.append(watermark_id)
+        
+        # Execute update
+        self.db_manager.execute_query(query, tuple(params), fetch=False)
+        
+        # Get updated watermark
+        return self.get_watermark_by_id(watermark_id)
     
     def delete_watermark(self, watermark_id: int) -> bool:
         """
@@ -198,18 +238,20 @@ class WatermarkService:
         Returns:
             bool: True if deleted successfully, False if not found
         """
-        # TODO: Replace with database DELETE operation
-        # Example SQL: DELETE FROM watermarks WHERE watermark_id = %s
+        # Use database only
+        query = """
+            DELETE FROM watermarks 
+            WHERE watermark_id = %s
+        """
         
-        watermarks_data = self._load_watermarks()
+        if self.db_manager.db_type == 'sqlite':
+            query = query.replace('%s', '?')
         
-        for i, watermark_data in enumerate(watermarks_data):
-            if watermark_data.get('watermark_id') == watermark_id:
-                # Remove watermark
-                del watermarks_data[i]
-                self._save_watermarks(watermarks_data)
-                return True
-        
+        # Check if watermark exists first
+        existing = self.get_watermark_by_id(watermark_id)
+        if existing:
+            self.db_manager.execute_query(query, (watermark_id,), fetch=False)
+            return True
         return False
     
     def search_watermarks(self, query: str) -> List[Watermark]:
@@ -225,16 +267,37 @@ class WatermarkService:
         if not query or not query.strip():
             return []
         
-        # TODO: Replace with database LIKE/ILIKE operation
-        # Example SQL: SELECT watermark_id, store_name, watermark_url_image FROM watermarks WHERE store_name ILIKE %s
+        # Use database only
+        if self.db_manager.db_type == 'postgresql':
+            search_query = """
+                SELECT watermark_id, store_name, watermark_url_image 
+                FROM watermarks 
+                WHERE store_name ILIKE %s
+                ORDER BY watermark_id
+            """
+        elif self.db_manager.db_type == 'mysql':
+            search_query = """
+                SELECT watermark_id, store_name, watermark_url_image 
+                FROM watermarks 
+                WHERE store_name LIKE %s
+                ORDER BY watermark_id
+            """
+        else:  # SQLite
+            search_query = """
+                SELECT watermark_id, store_name, watermark_url_image 
+                FROM watermarks 
+                WHERE store_name LIKE ?
+                ORDER BY watermark_id
+            """
         
-        query_lower = query.strip().lower()
-        watermarks_data = self._load_watermarks()
-        matching_watermarks = []
+        search_pattern = f"%{query.strip()}%"
         
-        for watermark_data in watermarks_data:
-            store_name = watermark_data.get('store_name', '')
-            if query_lower in store_name.lower():
-                matching_watermarks.append(Watermark.from_dict(watermark_data))
+        if self.db_manager.db_type == 'sqlite':
+            result = self.db_manager.execute_query(search_query, (search_pattern,))
+        else:
+            result = self.db_manager.execute_query(search_query, (search_pattern,))
         
-        return matching_watermarks
+        if result:
+            return [Watermark.from_dict(w) for w in result]
+        
+        return []
