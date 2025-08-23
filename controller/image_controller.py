@@ -1,4 +1,5 @@
 # controller/image_controller.py
+import base64
 from flask import request, jsonify
 from service.image_service import ImageService
 from service.embeded_service import EmbeddedService
@@ -494,59 +495,6 @@ class ImageController:
         Returns:
             tuple or None: Error response tuple if validation fails, None if valid
         """
-        if not data:
-            return jsonify({
-                'error': 'Request body is required',
-                'code': 'MISSING_BODY'
-            }), 400
-
-        if 'original_watermark' not in data:
-            return jsonify({
-                'error': 'Missing required field: original_watermark',
-                'code': 'MISSING_FIELD'
-            }), 400
-
-        if 'extracted_watermark' not in data:
-            return jsonify({
-                'error': 'Missing required field: extracted_watermark',
-                'code': 'MISSING_FIELD'
-            }), 400
-
-        if not data['original_watermark'] or not isinstance(data['original_watermark'], str):
-            return jsonify({
-                'error': 'original_watermark must be a non-empty base64 string',
-                'code': 'INVALID_IMAGE_DATA'
-            }), 400
-
-        if not data['extracted_watermark'] or not isinstance(data['extracted_watermark'], str):
-            return jsonify({
-                'error': 'extracted_watermark must be a non-empty base64 string',
-                'code': 'INVALID_IMAGE_DATA'
-            }), 400
-
-        # Validate pcc_threshold if provided
-        if 'pcc_threshold' in data:
-            threshold = data['pcc_threshold']
-            if not isinstance(threshold, (int, float)) or threshold < 0 or threshold > 1:
-                return jsonify({
-                    'error': 'pcc_threshold must be a number between 0 and 1',
-                    'code': 'INVALID_THRESHOLD'
-                }), 400
-
-        # Validate save_record if provided
-        if 'save_record' in data and not isinstance(data['save_record'], bool):
-            return jsonify({
-                'error': 'save_record must be a boolean',
-                'code': 'INVALID_BOOLEAN'
-            }), 400
-
-        # Validate suspect_image if provided
-        if 'suspect_image' in data and data['suspect_image'] is not None:
-            if not isinstance(data['suspect_image'], str) or not data['suspect_image']:
-                return jsonify({
-                    'error': 'suspect_image must be a non-empty base64 string when provided',
-                    'code': 'INVALID_IMAGE_DATA'
-                }), 400
-
+        # No validation - accept all data
         return None
 

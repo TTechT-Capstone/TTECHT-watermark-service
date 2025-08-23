@@ -161,8 +161,20 @@ class EmbeddedService:
         if base64_string.startswith('data:'):
             base64_string = base64_string.split(',')[1]
         
-        # Decode base64
-        image_data = base64.b64decode(base64_string)
+        # Decode base64 with padding handling
+        try:
+            # Try direct decode first
+            image_data = base64.b64decode(base64_string)
+        except Exception:
+            # If that fails, try with padding
+            try:
+                # Add padding if needed
+                padding = 4 - (len(base64_string) % 4)
+                if padding != 4:
+                    base64_string += '=' * padding
+                image_data = base64.b64decode(base64_string)
+            except Exception as e:
+                raise ValueError(f"Invalid base64 format: {str(e)}")
         
         # Convert to PIL Image
         image_stream = io.BytesIO(image_data)
