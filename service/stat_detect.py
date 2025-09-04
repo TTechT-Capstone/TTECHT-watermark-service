@@ -24,7 +24,7 @@ class StatDetectService:
             extracted_wm_b64: Base64 encoded extracted watermark image
             pcc_threshold: PCC threshold for detection (default: 0.70)
             save_record: Whether to save detection record for admin
-            suspect_image_b64: Optional base64 encoded suspect image for record
+            suspect_image_b64: Optional base64 encoded suspect image for record (ignored for core detection)
             
         Returns:
             Dict containing metrics, detection results, and optional record info
@@ -36,13 +36,11 @@ class StatDetectService:
         temp_dir = tempfile.mkdtemp()
         
         try:
-            # Decode and save images temporarily
+            # Decode and save images temporarily (only required images for detection)
             original_path = self._save_base64_to_temp(original_wm_b64, temp_dir, "original_wm")
             extracted_path = self._save_base64_to_temp(extracted_wm_b64, temp_dir, "extracted_wm")
-            suspect_path = None
             
-            if suspect_image_b64:
-                suspect_path = self._save_base64_to_temp(suspect_image_b64, temp_dir, "suspect")
+            # Skip suspect_image processing - not needed for detection
             
             # Compute metrics using your exact logic
             metrics = self._compute_metrics(original_path, extracted_path)
@@ -74,7 +72,7 @@ class StatDetectService:
                     extracted_wm_path=extracted_path,
                     metrics=metrics,
                     matched_json_path=None,
-                    suspect_image_path=suspect_path,
+                    suspect_image_path=None,  # No longer processing suspect image
                     out_root=self.detections_root,
                     pcc_threshold=pcc_threshold
                 )
@@ -204,16 +202,49 @@ class StatDetectService:
 
     def _save_base64_to_temp(self, base64_string: str, temp_dir: str, filename: str) -> str:
         """Save base64 image to temporary file and return path"""
+        if not base64_string or not isinstance(base64_string, str):
+            raise ValueError("Base64 string is required and must be a string")
+        
         # Remove data URL prefix if present
         if base64_string.startswith('data:'):
             base64_string = base64_string.split(',')[1]
         
-        # Decode base64
-        image_data = base64.b64decode(base64_string)
+        # Basic validation - check if string looks like base64
+        if len(base64_string.strip()) == 0:
+            raise ValueError("Base64 string is empty after processing")
+        
+        # Decode base64 with padding handling
+        try:
+            # Try direct decode first
+            image_data = base64.b64decode(base64_string)
+        except Exception:
+            # If that fails, try with padding
+            try:
+                # Add padding if needed
+                padding = 4 - (len(base64_string) % 4)
+                if padding != 4:
+                    base64_string += '=' * padding
+                image_data = base64.b64decode(base64_string)
+            except Exception as e:
+                raise ValueError(f"Invalid base64 format: {str(e)}")
+        
+        # Check if decoded data has reasonable size for an image
+        if len(image_data) < 100:  # Very small, likely not a real image
+            raise ValueError(f"Decoded image data too small ({len(image_data)} bytes), likely not a valid image")
         
         # Convert to PIL Image to determine format
         image_stream = io.BytesIO(image_data)
-        pil_image = Image.open(image_stream)
+        try:
+            pil_image = Image.open(image_stream)
+            # Verify image can be processed
+            pil_image.verify()
+            # Re-open for actual use (verify() closes the image)
+            image_stream.seek(0)
+            pil_image = Image.open(image_stream)
+        except Exception as e:
+            # Provide more detailed error information
+            data_preview = image_data[:50] if len(image_data) > 50 else image_data
+            raise ValueError(f"Invalid image data: {str(e)}. Data length: {len(image_data)} bytes. The base64 data does not represent a valid image file.")
         
         # Determine file extension
         format_lower = pil_image.format.lower() if pil_image.format else 'jpg'

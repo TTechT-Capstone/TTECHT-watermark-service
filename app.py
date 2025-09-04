@@ -50,8 +50,10 @@ def create_app():
     try:
         from routes.image_routes import image_bp
         from routes.watermark_routes import watermark_bp
+        from routes.direct_api_routes import direct_api_bp
         app.register_blueprint(image_bp)
         app.register_blueprint(watermark_bp)
+        app.register_blueprint(direct_api_bp)
     except ImportError as e:
         print(f"Error importing routes: {e}")
         raise

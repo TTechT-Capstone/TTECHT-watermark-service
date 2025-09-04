@@ -109,6 +109,16 @@ class EmbeddedService:
         # Convert watermarked image to base64 for API response
         watermarked_b64 = self._pil_to_base64(watermarked_rgb)
         
+        # Convert original watermark to base64 for extraction use
+        watermark_b64 = self._pil_to_base64(watermark_image)
+        
+        # Add watermark base64 to metadata for easy extraction
+        meta["watermark_ref"]["image_base64"] = watermark_b64
+        
+        # Update the saved JSON file with the new metadata
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        
         return {
             "watermarked_image_b64": watermarked_b64,
             "output_path": out_path,
@@ -161,8 +171,20 @@ class EmbeddedService:
         if base64_string.startswith('data:'):
             base64_string = base64_string.split(',')[1]
         
-        # Decode base64
-        image_data = base64.b64decode(base64_string)
+        # Decode base64 with padding handling
+        try:
+            # Try direct decode first
+            image_data = base64.b64decode(base64_string)
+        except Exception:
+            # If that fails, try with padding
+            try:
+                # Add padding if needed
+                padding = 4 - (len(base64_string) % 4)
+                if padding != 4:
+                    base64_string += '=' * padding
+                image_data = base64.b64decode(base64_string)
+            except Exception as e:
+                raise ValueError(f"Invalid base64 format: {str(e)}")
         
         # Convert to PIL Image
         image_stream = io.BytesIO(image_data)

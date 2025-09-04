@@ -94,6 +94,37 @@ class WatermarkController:
                 'code': 'WATERMARK_RETRIEVAL_ERROR'
             }), 500
 
+    def get_watermark_by_store_name(self, store_name: str):
+        """
+        Handle get watermark by store name request
+        
+        Args:
+            store_name: Name of the store to search for
+            
+        Returns:
+            tuple: (response_data, status_code)
+        """
+        try:
+            # Get watermark through service
+            watermark = self.watermark_service.get_watermark_by_store_name(store_name)
+            
+            if watermark:
+                return jsonify({
+                    'success': True,
+                    'data': watermark.to_dict()
+                }), 200
+            else:
+                return jsonify({
+                    'error': f'Watermark for store "{store_name}" not found',
+                    'code': 'WATERMARK_NOT_FOUND'
+                }), 404
+
+        except Exception as e:
+            return jsonify({
+                'error': str(e),
+                'code': 'WATERMARK_RETRIEVAL_ERROR'
+            }), 500
+
     def get_all_watermarks(self):
         """
         Handle get all watermarks request

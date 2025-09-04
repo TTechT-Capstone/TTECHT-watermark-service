@@ -29,6 +29,11 @@ def get_watermark(watermark_id):
     """Get watermark by ID endpoint"""
     return watermark_controller.get_watermark(watermark_id)
 
+@watermark_bp.route('/store/<store_name>', methods=['GET'])
+def get_watermark_by_store_name(store_name):
+    """Get watermark by store name endpoint"""
+    return watermark_controller.get_watermark_by_store_name(store_name)
+
 @watermark_bp.route('/<int:watermark_id>', methods=['PUT'])
 def update_watermark(watermark_id):
     """Update watermark by ID endpoint"""
