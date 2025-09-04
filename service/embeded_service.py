@@ -109,6 +109,16 @@ class EmbeddedService:
         # Convert watermarked image to base64 for API response
         watermarked_b64 = self._pil_to_base64(watermarked_rgb)
         
+        # Convert original watermark to base64 for extraction use
+        watermark_b64 = self._pil_to_base64(watermark_image)
+        
+        # Add watermark base64 to metadata for easy extraction
+        meta["watermark_ref"]["image_base64"] = watermark_b64
+        
+        # Update the saved JSON file with the new metadata
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+        
         return {
             "watermarked_image_b64": watermarked_b64,
             "output_path": out_path,

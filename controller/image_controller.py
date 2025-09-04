@@ -204,8 +204,19 @@ class ImageController:
         Expected JSON payload:
         {
             "suspect_image": "base64_encoded_suspect_image",
-            "sideinfo_json_path": "/path/to/sideinfo.wm.json"  // optional
+            "sideinfo_json": {  // optional - sideinfo with original watermark logo
+                "wm_params": {"alpha": 0.6, "wavelet": "haar", "channels": "RGB"},
+                "canonical_size": [512, 512],
+                "host_S": {"R": [...], "G": [...], "B": [...]},
+                "watermark_ref": {
+                    "image_base64": "base64_encoded_original_watermark_logo"
+                    // OR "path": "/path/to/original_watermark_logo.png" (for backward compatibility)
+                }
+            }
         }
+        
+        Note: Extraction requires the ORIGINAL watermark logo (either as base64 image or file path).
+        You can now provide the watermark logo directly as base64 data instead of a file path.
         
         Returns:
             tuple: (response_data, status_code)
@@ -228,12 +239,12 @@ class ImageController:
 
             # Extract parameters
             suspect_image = data['suspect_image']
-            sideinfo_json_path = data.get('sideinfo_json_path', None)
+            sideinfo_json = data.get('sideinfo_json', None)
 
             # Process watermark extraction through service
-            result = self.extract_service.extract_watermark_from_base64(
+            result = self.extract_service.extract_watermark_from_base64_with_json(
                 suspect_image, 
-                sideinfo_json_path
+                sideinfo_json
             )
             
             # Handle different extraction statuses
@@ -475,13 +486,45 @@ class ImageController:
                 'code': 'INVALID_IMAGE_DATA'
             }), 400
 
-        # Validate sideinfo_json_path if provided
-        if 'sideinfo_json_path' in data and data['sideinfo_json_path'] is not None:
-            if not isinstance(data['sideinfo_json_path'], str):
+        # Validate sideinfo_json if provided
+        if 'sideinfo_json' in data and data['sideinfo_json'] is not None:
+            if not isinstance(data['sideinfo_json'], dict):
                 return jsonify({
-                    'error': 'sideinfo_json_path must be a string',
-                    'code': 'INVALID_PATH'
+                    'error': 'sideinfo_json must be a JSON object',
+                    'code': 'INVALID_SIDEINFO_FORMAT'
                 }), 400
+            
+            sideinfo = data['sideinfo_json']
+            
+            # Validate required fields in sideinfo_json
+            required_fields = ['wm_params', 'host_S', 'watermark_ref']
+            for field in required_fields:
+                if field not in sideinfo:
+                    return jsonify({
+                        'error': f'Missing required field in sideinfo_json: {field}',
+                        'code': 'MISSING_SIDEINFO_FIELD'
+                    }), 400
+            
+            # Validate watermark_ref has either path or image_base64
+            watermark_ref = sideinfo['watermark_ref']
+            has_path = 'path' in watermark_ref and watermark_ref['path']
+            has_base64 = 'image_base64' in watermark_ref and watermark_ref['image_base64']
+            
+            if not has_path and not has_base64:
+                return jsonify({
+                    'error': 'watermark_ref must contain either "path" or "image_base64" field for the original watermark logo',
+                    'code': 'MISSING_WATERMARK_REFERENCE'
+                }), 400
+            
+            # Validate base64 format if provided
+            if has_base64:
+                try:
+                    base64.b64decode(watermark_ref['image_base64'], validate=True)
+                except Exception as e:
+                    return jsonify({
+                        'error': f'watermark_ref.image_base64 has invalid base64 format: {str(e)}',
+                        'code': 'INVALID_BASE64_FORMAT'
+                    }), 400
 
         return None
 

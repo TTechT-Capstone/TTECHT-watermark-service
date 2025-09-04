@@ -78,6 +78,59 @@ class ExtractService:
         
         return result
     
+    def extract_watermark_from_base64_with_json(self, suspect_image_b64: str, sideinfo_json: dict = None, 
+                                               output_dir: str = None) -> Dict[str, Any]:
+        """
+        Extract watermark from suspect image using base64 input and JSON sideinfo
+        
+        Args:
+            suspect_image_b64: Base64 encoded suspect image
+            sideinfo_json: Optional JSON object with sideinfo data (instead of file path)
+            output_dir: Output directory for extracted watermark (default: temp directory)
+            
+        Returns:
+            Dict containing extraction results and metadata
+        """
+        # Decode base64 image and save temporarily
+        suspect_image = self._decode_base64_to_pil(suspect_image_b64)
+        
+        # Create temp directory for processing
+        temp_dir = tempfile.mkdtemp()
+        suspect_path = os.path.join(temp_dir, f"suspect_{uuid.uuid4().hex}.jpg")
+        suspect_image.save(suspect_path)
+        
+        # Create output directory if not specified
+        if output_dir is None:
+            output_dir = os.path.join(tempfile.gettempdir(), "extracted_watermarks")
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate unique filename for extracted watermark
+        unique_id = str(uuid.uuid4())
+        extracted_path = os.path.join(output_dir, f"extracted_{unique_id}.jpg")
+        
+        # Perform extraction with JSON sideinfo
+        if sideinfo_json:
+            result = self._extract_from_suspect_with_meta(suspect_path, sideinfo_json, extracted_path, "provided_json")
+        else:
+            result = self._extract_from_suspect(suspect_path, None, extracted_path)
+        
+        # Clean up temp file
+        try:
+            os.remove(suspect_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
+        
+        # Convert extracted image to base64 if extraction was successful
+        if result["status"] == "ok_extracted" and os.path.exists(extracted_path):
+            with open(extracted_path, "rb") as f:
+                extracted_b64 = base64.b64encode(f.read()).decode('utf-8')
+            result["extracted_image_b64"] = extracted_b64
+            result["unique_id"] = unique_id
+        
+        return result
+    
     def extract_watermark_from_url(self, suspect_image_url: str, sideinfo_json_path: str = None,
                                    output_dir: str = None, timeout_seconds: int = 15) -> Dict[str, Any]:
         """
@@ -339,7 +392,16 @@ class ExtractService:
             S_R = np.array(meta["host_S"]["R"], dtype=np.float64)
             S_G = np.array(meta["host_S"]["G"], dtype=np.float64)
             S_B = np.array(meta["host_S"]["B"], dtype=np.float64)
-            wm_logo_path = meta["watermark_ref"]["path"]
+            
+            # Handle watermark logo - either from base64 or file path
+            watermark_ref = meta["watermark_ref"]
+            if "image_base64" in watermark_ref:
+                # For backward compatibility, if base64 is provided in file-based sideinfo
+                wm_logo_path = "base64_data"  # placeholder for later handling
+            elif "path" in watermark_ref:
+                wm_logo_path = watermark_ref["path"]
+            else:
+                return {"status": "skip_bad_meta", "reason": "Missing watermark reference (path or image_base64). Proceed to embedding."}
         except FileNotFoundError:
             return {"status": "skip_no_sideinfo", "reason": "Side-info file missing. Proceed to embedding."}
         except KeyError as e:
@@ -347,14 +409,21 @@ class ExtractService:
         except Exception as e:
             return {"status": "skip_bad_meta", "reason": f"Unreadable side-info: {e}. Proceed to embedding."}
 
-        # Validate watermark logo path
-        if not os.path.exists(wm_logo_path):
-            return {"status": "skip_bad_meta", "reason": "Watermark logo path invalid. Proceed to embedding."}
-
         # Load the images
         try:
-            watermark_logo = Image.open(wm_logo_path).convert("RGB")
-            suspect_img    = Image.open(suspect_path).convert("RGB")
+            if wm_logo_path == "base64_data":
+                # Load watermark from base64
+                watermark_logo = self._decode_base64_to_pil(watermark_ref["image_base64"]).convert("RGB")
+                wm_logo_source = "base64_data"
+            else:
+                # Validate watermark logo path
+                if not os.path.exists(wm_logo_path):
+                    return {"status": "skip_bad_meta", "reason": "Watermark logo path invalid. Proceed to embedding."}
+                # Load watermark from file
+                watermark_logo = Image.open(wm_logo_path).convert("RGB")
+                wm_logo_source = wm_logo_path
+                
+            suspect_img = Image.open(suspect_path).convert("RGB")
         except Exception as e:
             return {"status": "skip_bad_meta", "reason": f"Image open failed: {e}. Proceed to embedding."}
 
@@ -386,7 +455,7 @@ class ExtractService:
             "wavelet": wavelet_name,
             "canonical_size": canonical_wh,
             "sideinfo_used": sideinfo_path,
-            "watermark_logo": wm_logo_path,
+            "watermark_logo": wm_logo_source,
             "extracted_path": out_path
         }
     
@@ -399,17 +468,30 @@ class ExtractService:
             S_R = np.array(meta["host_S"]["R"], dtype=np.float64)
             S_G = np.array(meta["host_S"]["G"], dtype=np.float64)
             S_B = np.array(meta["host_S"]["B"], dtype=np.float64)
-            wm_logo_path = meta["watermark_ref"]["path"]
+            
+            # Handle watermark logo - either from base64 or file path
+            watermark_ref = meta["watermark_ref"]
+            if "image_base64" in watermark_ref:
+                # Use base64 image data
+                watermark_logo = self._decode_base64_to_pil(watermark_ref["image_base64"])
+                wm_logo_source = "base64_data"
+            elif "path" in watermark_ref:
+                # Use file path (backward compatibility)
+                wm_logo_path = watermark_ref["path"]
+                if not os.path.exists(wm_logo_path):
+                    return {"status": "skip_bad_meta", "reason": "Watermark logo path invalid. Proceed to embedding."}
+                watermark_logo = Image.open(wm_logo_path).convert("RGB")
+                wm_logo_source = wm_logo_path
+            else:
+                return {"status": "skip_bad_meta", "reason": "Missing watermark reference (path or image_base64). Proceed to embedding."}
+                
         except KeyError as e:
             return {"status": "skip_bad_meta", "reason": f"Missing key {e}. Proceed to embedding."}
         except Exception as e:
             return {"status": "skip_bad_meta", "reason": f"Unreadable side-info: {e}. Proceed to embedding."}
 
-        if not os.path.exists(wm_logo_path):
-            return {"status": "skip_bad_meta", "reason": "Watermark logo path invalid. Proceed to embedding."}
-
         try:
-            watermark_logo = Image.open(wm_logo_path).convert("RGB")
+            watermark_logo = watermark_logo.convert("RGB")
             suspect_img    = Image.open(suspect_path).convert("RGB")
         except Exception as e:
             return {"status": "skip_bad_meta", "reason": f"Image open failed: {e}. Proceed to embedding."}
@@ -438,7 +520,7 @@ class ExtractService:
             "wavelet": wavelet_name,
             "canonical_size": canonical_wh,
             "sideinfo_used": sideinfo_used,
-            "watermark_logo": wm_logo_path,
+            "watermark_logo": wm_logo_source,
             "extracted_path": out_path
         }
     
