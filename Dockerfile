@@ -36,5 +36,5 @@ ENV PORT=5000
 ENV WORKERS=1
 ENV PYTHONUNBUFFERED=1
 
-# Start with fewer workers for debugging
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:5000", "--workers", "1", "--log-level", "debug"]
+# Start with proper timeout settings for image processing operations
+CMD ["gunicorn", "app:app", "-c", "gunicorn.conf.py"]

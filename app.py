@@ -37,6 +37,8 @@ def create_app():
     # Configure Flask
     app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max request size
     app.config['JSON_SORT_KEYS'] = False
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching for development
+    app.config['PERMANENT_SESSION_LIFETIME'] = 300  # 5 minutes session timeout
     
     # Configure Cloudinary
     cloudinary.config(
@@ -73,11 +75,28 @@ def create_app():
             'code': 'METHOD_NOT_ALLOWED'
         }, 405
     
+    @app.errorhandler(408)
+    def request_timeout(error):
+        return {
+            'error': 'Request timeout - image processing took too long',
+            'code': 'REQUEST_TIMEOUT',
+            'message': 'Please try with a smaller image or contact support if the issue persists'
+        }, 408
+    
+    @app.errorhandler(413)
+    def request_entity_too_large(error):
+        return {
+            'error': 'Request entity too large',
+            'code': 'REQUEST_TOO_LARGE',
+            'message': 'Image size exceeds 16MB limit'
+        }, 413
+    
     @app.errorhandler(500)
     def internal_error(error):
         return {
             'error': 'Internal server error',
-            'code': 'INTERNAL_ERROR'
+            'code': 'INTERNAL_ERROR',
+            'message': 'An unexpected error occurred during image processing'
         }, 500
     
     # Add a simple health check route

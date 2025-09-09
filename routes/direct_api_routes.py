@@ -4,6 +4,10 @@ from service.embeded_service import EmbeddedService
 from service.extract_service import ExtractService
 from service.stat_detect import StatDetectService
 import base64
+import threading
+import time
+from functools import wraps
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 # Create blueprint for direct API calls
 direct_api_bp = Blueprint('direct_api', __name__, url_prefix='/api/direct')
@@ -12,6 +16,36 @@ direct_api_bp = Blueprint('direct_api', __name__, url_prefix='/api/direct')
 embedded_service = EmbeddedService()
 extract_service = ExtractService()
 detect_service = StatDetectService()
+
+# Thread-safe timeout decorator for long-running operations
+def with_timeout(timeout_seconds=240):
+    """Decorator to add timeout to functions using ThreadPoolExecutor"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Use ThreadPoolExecutor for timeout functionality
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                try:
+                    # Submit the function to the executor
+                    future = executor.submit(func, *args, **kwargs)
+                    # Wait for result with timeout
+                    result = future.result(timeout=timeout_seconds)
+                    return result
+                except FuturesTimeoutError:
+                    return {
+                        'error': f'Operation timed out after {timeout_seconds} seconds',
+                        'code': 'OPERATION_TIMEOUT',
+                        'message': 'Image processing is taking longer than expected. Please try with a smaller image.'
+                    }
+                except Exception as e:
+                    # Handle any other exceptions that might occur
+                    return {
+                        'error': f'Error during operation: {str(e)}',
+                        'code': 'OPERATION_ERROR',
+                        'message': 'An error occurred during image processing.'
+                    }
+        return wrapper
+    return decorator
 
 # Direct Embed Watermark API
 @direct_api_bp.route('/embed', methods=['POST'])
@@ -79,12 +113,23 @@ def direct_embed_watermark():
                 'code': 'INVALID_ALPHA'
             }), 400
 
-        # Call service directly
-        result = embedded_service.embed_watermark_from_base64(
-            data['original_image'], 
-            data['watermark_image'], 
-            alpha
-        )
+        # Call service directly with timeout protection
+        @with_timeout(240)  # 4 minutes timeout
+        def embed_watermark():
+            return embedded_service.embed_watermark_from_base64(
+                data['original_image'], 
+                data['watermark_image'], 
+                alpha
+            )
+        
+        result = embed_watermark()
+        
+        # Check if timeout or error occurred
+        if isinstance(result, dict) and 'error' in result:
+            if result.get('code') == 'OPERATION_TIMEOUT':
+                return jsonify(result), 408
+            elif result.get('code') == 'OPERATION_ERROR':
+                return jsonify(result), 500
         
         return jsonify({
             'success': True,
@@ -203,11 +248,22 @@ def direct_extract_watermark():
                         'code': 'INVALID_BASE64_FORMAT'
                     }), 400
 
-        # Call service directly
-        result = extract_service.extract_watermark_from_base64_with_json(
-            data['suspect_image'], 
-            sideinfo_json
-        )
+        # Call service directly with timeout protection
+        @with_timeout(240)  # 4 minutes timeout
+        def extract_watermark():
+            return extract_service.extract_watermark_from_base64_with_json(
+                data['suspect_image'], 
+                sideinfo_json
+            )
+        
+        result = extract_watermark()
+        
+        # Check if timeout or error occurred
+        if isinstance(result, dict) and 'error' in result:
+            if result.get('code') == 'OPERATION_TIMEOUT':
+                return jsonify(result), 408
+            elif result.get('code') == 'OPERATION_ERROR':
+                return jsonify(result), 500
         
         # Handle different extraction statuses
         if result["status"] == "ok_extracted":
